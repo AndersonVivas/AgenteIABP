@@ -1,0 +1,136 @@
+import ssl
+import os
+from typing import List
+
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_ollama import OllamaLLM, OllamaEmbeddings
+from langchain.prompts import PromptTemplate
+
+# OCR
+from pdf2image import convert_from_path
+import pytesseract
+
+# -------------------------------------------------------------------
+# Fix para evitar el error de OpenMP en macOS
+# -------------------------------------------------------------------
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+# Configuración SSL
+ssl._create_default_https_context = ssl._create_unverified_context
+os.environ['CURL_CA_BUNDLE'] = ''
+
+# -------------------------------------------------------------------
+# Función OCR
+# -------------------------------------------------------------------
+def ocr_pdf(file_path: str) -> List[Document]:
+    print("🔎 Procesando PDF con OCR (Tesseract)...")
+    pages = convert_from_path(file_path, dpi=300)
+    docs = []
+    for i, page in enumerate(pages):
+        txt = pytesseract.image_to_string(
+            page,
+            lang="spa",
+            config="--oem 3 --psm 6"   # modo bloque, mejor para formularios
+        )
+        txt = " ".join(txt.split())    # normalizar espacios
+        docs.append(Document(page_content=txt, metadata={"page": i+1}))
+    return docs
+
+# -------------------------------------------------------------------
+# Cargar PDF con fallback OCR
+# -------------------------------------------------------------------
+def load_pdf_with_fallback(file_path: str) -> List[Document]:
+    print("📄 Intentando extraer texto digital...")
+    loader = PyPDFLoader(file_path)
+    docs = loader.load()
+
+    if not any(doc.page_content.strip() for doc in docs):
+        print("⚠️ PDF parece escaneado, aplicando OCR...")
+        docs = ocr_pdf(file_path)
+
+    return docs
+
+# -------------------------------------------------------------------
+# Procesar PDF y crear vectorstore
+# -------------------------------------------------------------------
+def process_pdf(pdf_path: str) -> FAISS:
+    docs = ocr_pdf(pdf_path)
+    print(f"✅ OCR completado. Páginas: {len(docs)}")
+
+    # Dividir en chunks más pequeños
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=600,
+        chunk_overlap=80,
+        separators=["\n\n", "\n", " ", ""]
+    )
+    chunks = splitter.split_documents(docs)
+    print(f"Texto dividido en {len(chunks)} fragmentos.")
+
+    # Embeddings con Ollama (bge-m3)
+    embeddings = OllamaEmbeddings(
+        model="bge-m3"
+    )
+
+    # Crear FAISS vectorstore
+    vectorstore = FAISS.from_documents(chunks, embeddings)
+    print("✅ Vectorstore creado con embeddings bge-m3.")
+    return vectorstore
+
+# -------------------------------------------------------------------
+# Función principal
+# -------------------------------------------------------------------
+def main():
+    pdf_path = "Activos_Fijos.pdf"  # Cambia por tu archivo
+    vectorstore = process_pdf(pdf_path)
+
+    # Cargar modelo Ollama (Mistral)
+    print("Cargando modelo Ollama (Mistral)...")
+    llm = OllamaLLM(model="mistral")
+    print("Modelo cargado correctamente ✅")
+
+    # Prompt anti-alucinación
+    prompt = PromptTemplate(
+        template=(
+            "Responde SOLO con información presente en el contexto.\n"
+            "Si el dato no aparece literal, responde exactamente: No encontrado en el documento.\n"
+            "Cuando cites montos u horas, devuélvelos tal cual están escritos.\n\n"
+            "Pregunta: {question}\n"
+            "Contexto:\n{context}\n\n"
+            "Respuesta:"
+        ),
+        input_variables=["question", "context"]
+    )
+
+    # Crear RetrievalQA con MMR y más cobertura
+    retriever = vectorstore.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": 8, "fetch_k": 30, "lambda_mult": 0.25}
+    )
+
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        retriever=retriever,
+        chain_type="stuff",
+        chain_type_kwargs={"prompt": prompt}
+    )
+
+    # Ejemplos de consultas
+    preguntas = [
+        "¿Cuáles son los montos totales mencionados en el documento?",
+        "¿HORA LLEGADA POR EL CLIENTE ENTREGA?",
+        "El documento cuenta con OFICINA REMITENTE: me lo puedes indicar cual es?",
+        "No estoy seguro si el documento está firmado me confirmas si lo está? para asegurar que si está dirmado debe tener una firma digital o una firma realizada por esfero."
+    ]
+
+    for pregunta in preguntas:
+        print("\n" + "=" * 60)
+        print("Pregunta:", pregunta)
+        respuesta = qa_chain.invoke(pregunta)
+        print("Respuesta del modelo:", respuesta)
+
+if __name__ == "__main__":
+    main()
