@@ -63,8 +63,8 @@ def process_pdf(pdf_path: str) -> FAISS:
 
     # Dividir en chunks más pequeños
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=600,
-        chunk_overlap=80,
+        chunk_size=350,
+        chunk_overlap=100,
         separators=["\n\n", "\n", " ", ""]
     )
     chunks = splitter.split_documents(docs)
@@ -94,21 +94,23 @@ def main():
 
     # Prompt anti-alucinación
     prompt = PromptTemplate(
-        template=(
-            "Responde SOLO con información presente en el contexto.\n"
-            "Si el dato no aparece literal, responde exactamente: No encontrado en el documento.\n"
-            "Cuando cites montos u horas, devuélvelos tal cual están escritos.\n\n"
-            "Pregunta: {question}\n"
-            "Contexto:\n{context}\n\n"
-            "Respuesta:"
-        ),
+        template="""
+                Responde únicamente con lo que esté en el contexto.  
+                Si hay varias coincidencias (ejemplo: horas de llegada), devuélvelas todas en forma de lista exacta.  
+                Si no aparece, responde: No encontrado en el documento.  
+
+                Pregunta: {question}  
+                Contexto:  {context}  
+
+                Respuesta:
+                """,
         input_variables=["question", "context"]
     )
 
     # Crear RetrievalQA con MMR y más cobertura
     retriever = vectorstore.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": 8, "fetch_k": 30, "lambda_mult": 0.25}
+        search_kwargs={"k": 5, "fetch_k": 40, "lambda_mult": 0.3}
     )
 
     qa_chain = RetrievalQA.from_chain_type(
@@ -123,7 +125,7 @@ def main():
         "¿Cuáles son los montos totales mencionados en el documento?",
         "¿HORA LLEGADA POR EL CLIENTE ENTREGA?",
         "El documento cuenta con OFICINA REMITENTE: me lo puedes indicar cual es?",
-        "No estoy seguro si el documento está firmado me confirmas si lo está? para asegurar que si está dirmado debe tener una firma digital o una firma realizada por esfero."
+        "No estoy seguro si el documento está firmado me confirmas si lo está?"
     ]
 
     for pregunta in preguntas:
