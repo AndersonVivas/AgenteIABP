@@ -95,15 +95,22 @@ def main():
     # Prompt anti-alucinación
     prompt = PromptTemplate(
         template="""
-                Responde únicamente con lo que esté en el contexto.  
-                Si hay varias coincidencias (ejemplo: horas de llegada), devuélvelas todas en forma de lista exacta.  
-                Si no aparece, responde: No encontrado en el documento.  
+            Actúa como un analista legal y financiero. 
+            Tu tarea es leer el contexto de un documento y devolver información de forma clara y exacta.
 
-                Pregunta: {question}  
-                Contexto:  {context}  
+            Instrucciones:
+            - Responde solo con lo que esté en el documento (no inventes).
+            - Si se repite información (ej: fechas, montos), devuelve todas en una lista.
+            - Si no se encuentra, responde: "No encontrado en el documento".
+            - Identifica el tipo de documento si es posible (ej: contrato, escritura, factura).
+            - Si el documento tiene firmas, fechas, montos, nombres de partes o cláusulas importantes, devuélvelos claramente.
+            - Mantén la redacción concisa y profesional.
 
-                Respuesta:
-                """,
+            Pregunta: {question}  
+            Contexto: {context}  
+
+            Respuesta:
+            """,
         input_variables=["question", "context"]
     )
 
@@ -122,11 +129,14 @@ def main():
 
     # Ejemplos de consultas
     preguntas = [
-        "¿Cuáles son los montos totales mencionados en el documento?",
-        "¿HORA LLEGADA POR EL CLIENTE ENTREGA?",
-        "El documento cuenta con OFICINA REMITENTE: me lo puedes indicar cual es?",
-        "No estoy seguro si el documento está firmado me confirmas si lo está?"
+        "¿Qué tipo de documento es este?",
+        "¿Quiénes son las partes involucradas?",
+        "¿Cuáles son los montos o valores mencionados?",
+        "¿Tiene firmas y de quién?",
+        "¿Qué fechas importantes se mencionan?",
+        "¿Existen cláusulas de rescisión o condiciones especiales?"
     ]
+
 
     for pregunta in preguntas:
         print("\n" + "=" * 60)
